@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nano AI | Local Browser LLM</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>Nano<span>AI</span></h1>
+            <p>100% Lokal • Keine API • Sicher</p>
+        </header>
+
+        <div id="status-container">
+            <div id="status-text">Warte auf Start...</div>
+            <div class="progress-bar">
+                <div id="progress-fill"></div>
+            </div>
+        </div>
+
+        <div id="chat-box">
+            <div class="message system">Willkommen! Sobald das Modell geladen ist, können wir chatten.</div>
+        </div>
+
+        <div class="input-area">
+            <input type="text" id="user-input" placeholder="Frag mich etwas..." disabled>
+            <button id="send-btn" disabled>Senden</button>
+        </div>
+    </div>
+
+    <script type="module">
+        // Importiere Transformers.js von einem CDN
+        import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0-alpha.19';
+
+        const statusText = document.getElementById('status-text');
+        const progressFill = document.getElementById('progress-fill');
+        const chatBox = document.getElementById('chat-box');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        let generator;
+
+        // Funktion zum Hinzufügen von Nachrichten
+        function addMessage(role, text) {
+            const msgDiv = document.createElement('div');
+            msgDiv.classList.add('message', role);
+            msgDiv.innerText = text;
+            chatBox.appendChild(msgDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        // KI Initialisierung
+        async function initAI() {
+            try {
+                statusText.innerText = "Modell wird geladen (ca. 900MB)...";
+                
+                generator = await pipeline('text-generation', 'onnx-community/Qwen2.5-0.5B-Instruct', {
+                    device: 'webgpu', // Versucht WebGPU (PC), fällt automatisch auf WASM (iPhone) zurück
+                    progress_callback: (data) => {
+                        if (data.status === 'progress') {
+                            progressFill.style.width = data.progress.toFixed(2) + '%';
+                            statusText.innerText = `Lade Daten: ${Math.round(data.progress)}%`;
+                        }
+                    }
+                });
+
+                statusText.innerText = "KI ist bereit!";
+                progressFill.style.backgroundColor = "#00ff88";
+                userInput.disabled = false;
+                sendBtn.disabled = false;
+                userInput.placeholder = "Schreib etwas...";
+            } catch (err) {
+                console.error(err);
+                statusText.innerText = "Fehler: WebGPU/WASM nicht unterstützt oder Download abgebrochen.";
+            }
+        }
+
+        async function generateResponse() {
+            const text = userInput.value;
+            if (!text) return;
+
+            addMessage('user', text);
+            userInput.value = '';
+            
+            const loadingMsg = document.createElement('div');
+            loadingMsg.classList.add('message', 'system');
+            loadingMsg.innerText = "KI denkt nach...";
+            chatBox.appendChild(loadingMsg);
+
+            try {
+                const output = await generator(text, { 
+                    max_new_tokens: 150,
+                    temperature: 0.7,
+                    do_sample: true 
+                });
+                
+                loadingMsg.remove();
+                addMessage('ai', output[0].generated_text.replace(text, "").trim());
+            } catch (e) {
+                loadingMsg.innerText = "Fehler bei der Generierung.";
+            }
+        }
+
+        sendBtn.onclick = generateResponse;
+        userInput.onkeypress = (e) => { if(e.key === 'Enter') generateResponse(); };
+
+        initAI();
+    </script>
+</body>
+</html>
