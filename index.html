@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nano AI | Local Browser LLM</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>Nano<span>AI</span></h1>
+            <p>100% Lokal • Qwen 2.5 • Sicher</p>
+        </header>
+
+        <div id="status-container">
+            <div id="status-text">Hardware wird geprüft...</div>
+            <div class="progress-bar">
+                <div id="progress-fill"></div>
+            </div>
+        </div>
+
+        <div id="chat-box">
+            <div class="message system">Das Modell wird beim ersten Mal geladen (ca. 900MB). Bitte hab einen Moment Geduld, wenn der Balken 100% erreicht.</div>
+        </div>
+
+        <div class="input-area">
+            <input type="text" id="user-input" placeholder="Warte auf Modell..." disabled>
+            <button id="send-btn" disabled>Senden</button>
+        </div>
+    </div>
+
+    <script type="module">
+        // Wir nutzen die stabilste Version von Transformers.js v3
+        import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0-alpha.19';
+
+        const statusText = document.getElementById('status-text');
+        const progressFill = document.getElementById('progress-fill');
+        const chatBox = document.getElementById('chat-box');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        let generator;
+
+        function addMessage(role, text) {
+            const msgDiv = document.createElement('div');
+            msgDiv.classList.add('message', role);
+            msgDiv.innerText = text;
+            chatBox.appendChild(msgDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        async function initAI() {
+            try {
+                statusText.innerText = "Lade Modell-Komponenten...";
+                
+                // Wir erzwingen WebGPU, fangen aber Fehler ab
+                generator = await pipeline('text-generation', 'onnx-community/Qwen2.5-0.5B-Instruct', {
+                    device: 'webgpu', 
+                    progress_callback: (data) => {
+                        if (data.status === 'progress') {
+                            progressFill.style.width = data.progress.toFixed(2) + '%';
+                            statusText.innerText = `Download: ${Math.round(data.progress)}%`;
+                        }
+                        if (data.status === 'ready') {
+                            statusText.innerText = "Fast fertig: Initialisiere KI...";
+                        }
+                    }
+                });
+
+                finishInit("Bereit (WebGPU)");
+
+            } catch (err) {
+                console.warn("WebGPU nicht verfügbar, nutze CPU Fallback...", err);
+                try {
+                    // Fallback auf WASM (CPU), falls WebGPU fehlschlägt
+                    generator = await pipeline('text-generation', 'onnx-community/Qwen2.5-0.5B-Instruct', {
+                        device: 'wasm'
+                    });
+                    finishInit("Bereit (CPU-Modus)");
+                } catch (wasmErr) {
+                    statusText.innerText = "Fehler: Gerät ist zu schwach.";
+                    console.error(wasmErr);
+                }
+            }
+        }
+
+        function finishInit(msg) {
+            statusText.innerText = msg;
+            progressFill.style.backgroundColor = "#00ff88";
+            progressFill.style.width = "100%";
+            userInput.disabled = false;
+            sendBtn.disabled = false;
+            userInput.placeholder = "Frag mich etwas...";
+        }
+
+        async function generateResponse() {
+            const text = userInput.value;
+            if (!text || !generator) return;
+
+            addMessage('user', text);
+            userInput.value = '';
+            
+            const loadingMsg = document.createElement('div');
+            loadingMsg.classList.add('message', 'system');
+            loadingMsg.innerText = "KI denkt nach...";
+            chatBox.appendChild(loadingMsg);
+
+            try {
+                // Generierungseinstellungen für Chat-Modelle
+                const output = await generator(text, { 
+                    max_new_tokens: 120,
+                    temperature: 0.7,
+                    do_sample: true 
+                });
+                
+                loadingMsg.remove();
+                // Wir säubern die Antwort, damit die Eingabe des Users nicht wiederholt wird
+                const aiResponse = output[0].generated_text.replace(text, "").trim();
+                addMessage('ai', aiResponse || "Ich konnte keine Antwort generieren.");
+            } catch (e) {
+                loadingMsg.innerText = "Fehler bei der Berechnung.";
+                console.error(e);
+            }
+        }
+
+        sendBtn.onclick = generateResponse;
+        userInput.onkeypress = (e) => { if(e.key === 'Enter') generateResponse(); };
+
+        // Startet den Prozess
+        initAI();
+    </script>
+</body>
+</html>
